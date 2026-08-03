@@ -1,30 +1,22 @@
-# SQL Query Scheduler — Plain Java 8
+# SQL Query Scheduler — Java 8 with Oracle UCP
 
-A Maven-based Java 8 application that executes a configurable SQL query repeatedly using `ScheduledExecutorService.scheduleWithFixedDelay`.
+A Maven-based Java 8 application that executes a configurable SQL query repeatedly with `ScheduledExecutorService.scheduleWithFixedDelay` and obtains database connections from Oracle Universal Connection Pool (UCP).
 
-## Design
+## Main design
 
-- `ApplicationConfig`: validates immutable configuration.
-- `ConnectionFactory`: abstracts JDBC connection creation.
-- `SqlQueryExecutor`: abstracts query execution.
-- `QueryResultHandler`: separates result processing from JDBC execution.
-- `QueryJob`: represents scheduled business work.
-- `TaskScheduler`: abstracts scheduling and shutdown.
-- `Application`: composition root that wires concrete implementations.
-
-This applies SRP, OCP, LSP, ISP and DIP by keeping responsibilities small and making higher-level behavior depend on interfaces.
+- `ApplicationConfig`: validates scheduler, query, and UCP settings.
+- `ConnectionFactory`: hides connection-acquisition details.
+- `OracleUcpConnectionFactory`: owns Oracle UCP and returns logical pooled connections.
+- `JdbcSqlQueryExecutor`: executes read-only queries and closes JDBC resources safely.
+- `SqlPollingJob`: protects future schedules from one failed execution.
+- `ExecutorTaskScheduler`: provides non-overlapping fixed-delay execution.
+- `Application`: wires components and closes the scheduler and pool gracefully.
 
 ## Prerequisites
 
 - JDK 8
 - Maven 3.6+
-
-Check:
-
-```bash
-java -version
-mvn -version
-```
+- Oracle Database 19c connection details
 
 ## Build and test
 
@@ -33,78 +25,64 @@ mvn clean test
 mvn clean package
 ```
 
-The executable fat JAR is created as:
-
-```text
-target/sql-query-scheduler.jar
-```
-
-Run it:
+Run:
 
 ```bash
 java -jar target/sql-query-scheduler.jar
 ```
 
-Press `Ctrl+C` to stop gracefully.
+## Oracle UCP configuration
 
-## Configuration
-
-Edit `src/main/resources/application.properties`.
+Edit `src/main/resources/application.properties`:
 
 ```properties
-db.driver=org.h2.Driver
-db.url=jdbc:h2:file:./data/schedulerdb;AUTO_SERVER=TRUE
-db.username=sa
-db.password=
-query.sql=SELECT ID, EVENT_NAME, CREATED_AT FROM SCHEDULED_EVENT ORDER BY ID
-query.timeout.seconds=30
-scheduler.initial.delay.seconds=2
-scheduler.delay.seconds=30
-scheduler.shutdown.timeout.seconds=10
-database.initialize.demo=true
-```
-
-`scheduleWithFixedDelay` starts the next execution only after the previous execution finishes and the configured delay passes. This prevents overlapping executions in this single-threaded scheduler.
-
-## Oracle 19c configuration
-
-The `pom.xml` includes the Oracle JDBC dependency for JDK 8:
-
-```xml
-<dependency>
-    <groupId>com.oracle.database.jdbc</groupId>
-    <artifactId>ojdbc8</artifactId>
-    <version>19.27.0.0</version>
-    <scope>runtime</scope>
-</dependency>
-```
-
-Configure Oracle in `application.properties`:
-
-```properties
-db.driver=oracle.jdbc.OracleDriver
 db.url=jdbc:oracle:thin:@//localhost:1521/ORCLPDB1
 db.username=app_user
 db.password=change_me
-query.sql=SELECT CUST_NUMBER, PASSKEY_HASH, HASH_UPDATATION_DATE FROM PASSKEY ORDER BY HASH_UPDATATION_DATE DESC
+
+db.pool.name=sql-query-scheduler-pool
+db.pool.initial-size=2
+db.pool.min-size=2
+db.pool.max-size=6
+db.pool.connection-wait-timeout-seconds=30
+db.pool.inactive-connection-timeout-seconds=0
+db.pool.validate-connection-on-borrow=true
+
+query.sql=SELECT ID, EVENT_NAME, CREATED_AT FROM SCHEDULED_EVENT ORDER BY ID
 query.timeout.seconds=30
-scheduler.initial.delay.seconds=5
-scheduler.delay.seconds=600
+
+scheduler.initial.delay.seconds=2
+scheduler.delay.seconds=30
 scheduler.shutdown.timeout.seconds=10
+
 database.initialize.demo=false
 ```
 
-Do not commit real database credentials. In production, load them from a protected external source or secret manager.
+### Pool-property meaning
 
-## Tests included
+- `initial-size`: physical connections created when UCP starts.
+- `min-size`: minimum number of connections retained.
+- `max-size`: maximum physical Oracle connections for this application instance.
+- `connection-wait-timeout-seconds`: maximum wait when all pooled connections are busy.
+- `inactive-connection-timeout-seconds`: reclaims inactive borrowed connections; `0` disables it.
+- `validate-connection-on-borrow`: validates a connection before the application receives it.
 
-- Configuration loading and validation.
-- JDBC delegation, timeout assignment and resource closure.
-- Real H2 integration test.
-- Query-job success and exception handling.
-- Generic result handling.
-- Repeated scheduler execution and validation.
+Pool size must be planned across all application instances. For example, five instances with `max-size=6` can create up to 30 physical database connections.
 
-## Production considerations
+## Connection lifecycle
 
-For frequent or high-volume jobs, replace `DriverManagerConnectionFactory` with a connection-pool implementation while retaining the same `ConnectionFactory` interface. For multiple application instances, use a database lock, leader election, or a clustered scheduler to avoid duplicate execution.
+Each scheduled execution borrows a logical connection:
+
+```text
+Delay expires → borrow connection → execute SQL → close connection → return to UCP
+```
+
+Never hold a connection while an item is waiting in a `DelayQueue`.
+
+## Logging and security
+
+Lifecycle, pool configuration, connection borrowing, query duration, scheduler shutdown, and failures are logged. Passwords and complete SQL statements are not logged. Do not commit real credentials; use protected external configuration or a secret manager in production.
+
+## Tests
+
+The test suite covers configuration validation, UCP delegation, JDBC resource handling, query jobs, result processing, classpath property loading, and scheduler behavior. UCP unit tests use mocks and do not require a live Oracle database.
