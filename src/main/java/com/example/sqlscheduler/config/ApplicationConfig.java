@@ -3,10 +3,9 @@ package com.example.sqlscheduler.config;
 import java.util.Objects;
 import java.util.Properties;
 
-/** Immutable application configuration. */
+/** Immutable, validated application and Oracle UCP configuration. */
 public final class ApplicationConfig {
 
-    private final String driverClassName;
     private final String jdbcUrl;
     private final String username;
     private final String password;
@@ -16,9 +15,15 @@ public final class ApplicationConfig {
     private final long delaySeconds;
     private final long shutdownTimeoutSeconds;
     private final boolean initializeDemoDatabase;
+    private final String poolName;
+    private final int initialPoolSize;
+    private final int minPoolSize;
+    private final int maxPoolSize;
+    private final int connectionWaitTimeoutSeconds;
+    private final int inactiveConnectionTimeoutSeconds;
+    private final boolean validateConnectionOnBorrow;
 
     private ApplicationConfig(Properties properties) {
-        this.driverClassName = required(properties, "db.driver");
         this.jdbcUrl = required(properties, "db.url");
         this.username = properties.getProperty("db.username", "");
         this.password = properties.getProperty("db.password", "");
@@ -27,12 +32,33 @@ public final class ApplicationConfig {
         this.initialDelaySeconds = nonNegativeLong(properties, "scheduler.initial.delay.seconds");
         this.delaySeconds = positiveLong(properties, "scheduler.delay.seconds");
         this.shutdownTimeoutSeconds = positiveLong(properties, "scheduler.shutdown.timeout.seconds");
-        this.initializeDemoDatabase = Boolean.parseBoolean(
-                properties.getProperty("database.initialize.demo", "false"));
+        this.initializeDemoDatabase = booleanValue(properties, "database.initialize.demo", false);
+        this.poolName = required(properties, "db.pool.name");
+        this.initialPoolSize = nonNegativeInt(properties, "db.pool.initial-size");
+        this.minPoolSize = nonNegativeInt(properties, "db.pool.min-size");
+        this.maxPoolSize = positiveInt(properties, "db.pool.max-size");
+        this.connectionWaitTimeoutSeconds = positiveInt(properties,
+                "db.pool.connection-wait-timeout-seconds");
+        this.inactiveConnectionTimeoutSeconds = nonNegativeInt(properties,
+                "db.pool.inactive-connection-timeout-seconds");
+        this.validateConnectionOnBorrow = booleanValue(properties,
+                "db.pool.validate-connection-on-borrow", true);
+        validatePoolSizes();
     }
 
+    /** Creates configuration from classpath properties. */
     public static ApplicationConfig from(Properties properties) {
-        return new ApplicationConfig(Objects.requireNonNull(properties, "properties must not be null"));
+        return new ApplicationConfig(Objects.requireNonNull(properties,
+                "properties must not be null"));
+    }
+
+    private void validatePoolSizes() {
+        if (minPoolSize > maxPoolSize) {
+            throw new IllegalArgumentException("db.pool.min-size must not exceed db.pool.max-size");
+        }
+        if (initialPoolSize > maxPoolSize) {
+            throw new IllegalArgumentException("db.pool.initial-size must not exceed db.pool.max-size");
+        }
     }
 
     private static String required(Properties properties, String key) {
@@ -43,8 +69,28 @@ public final class ApplicationConfig {
         return value.trim();
     }
 
+    private static boolean booleanValue(Properties properties, String key, boolean defaultValue) {
+        return Boolean.parseBoolean(properties.getProperty(key, String.valueOf(defaultValue)));
+    }
+
     private static int positiveInt(Properties properties, String key) {
-        long value = positiveLong(properties, key);
+        int value = intValue(properties, key);
+        if (value <= 0) {
+            throw new IllegalArgumentException(key + " must be greater than zero");
+        }
+        return value;
+    }
+
+    private static int nonNegativeInt(Properties properties, String key) {
+        int value = intValue(properties, key);
+        if (value < 0) {
+            throw new IllegalArgumentException(key + " must not be negative");
+        }
+        return value;
+    }
+
+    private static int intValue(Properties properties, String key) {
+        long value = parseLong(properties, key);
         if (value > Integer.MAX_VALUE) {
             throw new IllegalArgumentException(key + " exceeds Integer.MAX_VALUE");
         }
@@ -76,7 +122,6 @@ public final class ApplicationConfig {
         }
     }
 
-    public String getDriverClassName() { return driverClassName; }
     public String getJdbcUrl() { return jdbcUrl; }
     public String getUsername() { return username; }
     public String getPassword() { return password; }
@@ -86,4 +131,11 @@ public final class ApplicationConfig {
     public long getDelaySeconds() { return delaySeconds; }
     public long getShutdownTimeoutSeconds() { return shutdownTimeoutSeconds; }
     public boolean isInitializeDemoDatabase() { return initializeDemoDatabase; }
+    public String getPoolName() { return poolName; }
+    public int getInitialPoolSize() { return initialPoolSize; }
+    public int getMinPoolSize() { return minPoolSize; }
+    public int getMaxPoolSize() { return maxPoolSize; }
+    public int getConnectionWaitTimeoutSeconds() { return connectionWaitTimeoutSeconds; }
+    public int getInactiveConnectionTimeoutSeconds() { return inactiveConnectionTimeoutSeconds; }
+    public boolean isValidateConnectionOnBorrow() { return validateConnectionOnBorrow; }
 }
