@@ -6,10 +6,16 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Verifies repeated scheduling, single-task protection and delay validation. */
 class ExecutorTaskSchedulerTest {
 
+    /**
+     * Verifies that a scheduled task executes repeatedly with a fixed delay and that the
+     * scheduler can be stopped cleanly after the expected executions occur.
+     */
     @Test
     void shouldExecuteTaskRepeatedly() throws Exception {
         ExecutorTaskScheduler scheduler = new ExecutorTaskScheduler("scheduler-test");
@@ -29,6 +35,10 @@ class ExecutorTaskSchedulerTest {
         }
     }
 
+    /**
+     * Verifies that one scheduler instance accepts only one recurring task, preventing
+     * accidental duplicate polling of the same database workload.
+     */
     @Test
     void shouldRejectSecondScheduledTask() {
         ExecutorTaskScheduler scheduler = new ExecutorTaskScheduler("scheduler-test");
@@ -41,6 +51,7 @@ class ExecutorTaskSchedulerTest {
         }
     }
 
+    /** Verifies that a zero fixed delay is rejected before a task is registered. */
     @Test
     void shouldRejectInvalidDelay() {
         ExecutorTaskScheduler scheduler = new ExecutorTaskScheduler("scheduler-test");
