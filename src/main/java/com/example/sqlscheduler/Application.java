@@ -4,8 +4,8 @@ import com.example.sqlscheduler.config.ApplicationConfig;
 import com.example.sqlscheduler.config.PropertiesLoader;
 import com.example.sqlscheduler.db.ConnectionFactory;
 import com.example.sqlscheduler.db.DemoDatabaseInitializer;
-import com.example.sqlscheduler.db.DriverManagerConnectionFactory;
 import com.example.sqlscheduler.db.JdbcSqlQueryExecutor;
+import com.example.sqlscheduler.db.OracleUcpConnectionFactory;
 import com.example.sqlscheduler.db.QueryResultHandler;
 import com.example.sqlscheduler.db.SqlQueryExecutor;
 import com.example.sqlscheduler.job.LoggingQueryResultHandler;
@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * Application entry point and composition root.
  *
- * <p>This class creates and connects all concrete components. Business classes depend on
- * interfaces, while this class is the only place that knows which implementations are used.</p>
+ * <p>This class creates Oracle UCP, query-processing, and scheduling components and
+ * coordinates their startup and graceful shutdown.</p>
  */
 public final class Application {
 
@@ -32,66 +32,56 @@ public final class Application {
     private static final String CONFIG_RESOURCE = "application.properties";
 
     private Application() {
-        // Utility-style entry-point class; instances are not required.
+        // Entry-point class; instances are not required.
     }
 
-    /**
-     * Starts the SQL polling application and keeps the main thread alive until shutdown.
-     *
-     * @param args command-line arguments; currently unused
-     */
+    /** Starts the scheduler and keeps the JVM alive until shutdown. */
     public static void main(String[] args) {
         TaskScheduler scheduler = null;
+        ConnectionFactory connectionFactory = null;
         try {
-            LOGGER.info("Starting SQL Query Scheduler");
-            LOGGER.debug("Loading configuration resource: {}", CONFIG_RESOURCE);
-
+            LOGGER.info("Starting SQL Query Scheduler with Oracle UCP");
             Properties properties = new PropertiesLoader().load(CONFIG_RESOURCE);
             ApplicationConfig config = ApplicationConfig.from(properties);
 
-            LOGGER.info("Configuration loaded: databaseUrl={}, initialDelay={} seconds, "
-                            + "fixedDelay={} seconds, queryTimeout={} seconds, demoInitialization={}",
-                    config.getJdbcUrl(),
-                    config.getInitialDelaySeconds(),
-                    config.getDelaySeconds(),
-                    config.getQueryTimeoutSeconds(),
-                    config.isInitializeDemoDatabase());
+            LOGGER.info("Configuration loaded: databaseUrl={}, poolName={}, initialPoolSize={}, "
+                            + "minPoolSize={}, maxPoolSize={}, initialDelay={} seconds, "
+                            + "fixedDelay={} seconds, queryTimeout={} seconds",
+                    config.getJdbcUrl(), config.getPoolName(), config.getInitialPoolSize(),
+                    config.getMinPoolSize(), config.getMaxPoolSize(),
+                    config.getInitialDelaySeconds(), config.getDelaySeconds(),
+                    config.getQueryTimeoutSeconds());
 
-            ConnectionFactory connectionFactory = new DriverManagerConnectionFactory(
-                    config.getDriverClassName(),
-                    config.getJdbcUrl(),
-                    config.getUsername(),
-                    config.getPassword());
+            connectionFactory = new OracleUcpConnectionFactory(
+                    config.getJdbcUrl(), config.getUsername(), config.getPassword(),
+                    config.getPoolName(), config.getInitialPoolSize(), config.getMinPoolSize(),
+                    config.getMaxPoolSize(), config.getConnectionWaitTimeoutSeconds(),
+                    config.getInactiveConnectionTimeoutSeconds(),
+                    config.isValidateConnectionOnBorrow());
 
             if (config.isInitializeDemoDatabase()) {
-                LOGGER.info("Demo database initialization is enabled");
+                LOGGER.warn("Demo initialization is enabled; disable it for an existing Oracle schema");
                 new DemoDatabaseInitializer(connectionFactory).initialize();
-            } else {
-                LOGGER.debug("Demo database initialization is disabled");
             }
 
             SqlQueryExecutor queryExecutor = new JdbcSqlQueryExecutor(connectionFactory);
             QueryResultHandler resultHandler = new LoggingQueryResultHandler();
-            QueryJob queryJob = new SqlPollingJob(
-                    queryExecutor,
-                    config.getQuery(),
-                    config.getQueryTimeoutSeconds(),
-                    resultHandler);
+            QueryJob queryJob = new SqlPollingJob(queryExecutor, config.getQuery(),
+                    config.getQueryTimeoutSeconds(), resultHandler);
 
             scheduler = new ExecutorTaskScheduler("sql-query-scheduler");
             final TaskScheduler shutdownScheduler = scheduler;
+            final ConnectionFactory shutdownConnectionFactory = connectionFactory;
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                LOGGER.info("Shutdown signal received; stopping scheduler");
+                LOGGER.info("Shutdown signal received; stopping scheduled work");
                 shutdownScheduler.stop(config.getShutdownTimeoutSeconds(), TimeUnit.SECONDS);
-                LOGGER.info("SQL Query Scheduler stopped");
+                LOGGER.info("Scheduled work stopped; closing Oracle UCP");
+                shutdownConnectionFactory.close();
+                LOGGER.info("SQL Query Scheduler stopped cleanly");
             }, "sql-query-scheduler-shutdown"));
 
-            scheduler.scheduleWithFixedDelay(
-                    queryJob,
-                    config.getInitialDelaySeconds(),
-                    config.getDelaySeconds(),
-                    TimeUnit.SECONDS);
-
+            scheduler.scheduleWithFixedDelay(queryJob, config.getInitialDelaySeconds(),
+                    config.getDelaySeconds(), TimeUnit.SECONDS);
             LOGGER.info("Application started successfully. Press Ctrl+C to stop.");
             new CountDownLatch(1).await();
         } catch (InterruptedException exception) {
@@ -101,6 +91,9 @@ public final class Application {
             LOGGER.error("Application startup failed", exception);
             if (scheduler != null) {
                 scheduler.close();
+            }
+            if (connectionFactory != null) {
+                connectionFactory.close();
             }
             System.exit(1);
         }
