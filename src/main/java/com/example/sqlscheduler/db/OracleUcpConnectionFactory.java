@@ -28,6 +28,7 @@ public final class OracleUcpConnectionFactory implements ConnectionFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OracleUcpConnectionFactory.class);
     private static final String ORACLE_DATA_SOURCE_CLASS = "oracle.jdbc.pool.OracleDataSource";
+    private static final String UNKNOWN_POOL_NAME = "unknown";
 
     private final PoolDataSource poolDataSource;
     private final UniversalConnectionPoolManager poolManager;
@@ -107,11 +108,9 @@ public final class OracleUcpConnectionFactory implements ConnectionFactory {
      */
     @Override
     public Connection openConnection() throws SQLException {
-        LOGGER.debug("Borrowing Oracle connection from pool {}",
-                poolDataSource.getConnectionPoolName());
+        LOGGER.debug("Borrowing Oracle connection from pool {}", safePoolName());
         Connection connection = poolDataSource.getConnection();
-        LOGGER.debug("Oracle connection borrowed successfully from pool {}",
-                poolDataSource.getConnectionPoolName());
+        LOGGER.debug("Oracle connection borrowed successfully from pool {}", safePoolName());
         return connection;
     }
 
@@ -144,13 +143,19 @@ public final class OracleUcpConnectionFactory implements ConnectionFactory {
         }
     }
 
+    /**
+     * Returns a safe pool name for logging and lifecycle operations.
+     *
+     * <p>{@link PoolDataSource#getConnectionPoolName()} does not throw
+     * {@link SQLException}; therefore no checked-exception catch block is required.</p>
+     */
     private String safePoolName() {
-        try {
-            return poolDataSource.getConnectionPoolName();
-        } catch (SQLException exception) {
-            LOGGER.warn("Unable to read Oracle UCP pool name", exception);
-            return "unknown";
+        String poolName = poolDataSource.getConnectionPoolName();
+        if (poolName == null || poolName.trim().isEmpty()) {
+            LOGGER.warn("Oracle UCP pool name is unavailable");
+            return UNKNOWN_POOL_NAME;
         }
+        return poolName.trim();
     }
 
     private static void validatePoolSizes(int initial, int min, int max) {
