@@ -7,7 +7,7 @@
     <artifactId>sql-query-scheduler</artifactId>
     <version>1.0.0</version>
     <name>SQL Query Scheduler</name>
-    <description>Plain Java 8 application that executes a SQL query at regular intervals.</description>
+    <description>Java 8 application that executes SQL at regular intervals using Oracle UCP.</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -21,20 +21,23 @@
     </properties>
 
     <dependencies>
-        <!-- Oracle JDBC driver for Oracle Database 19c and JDK 8. -->
         <dependency>
             <groupId>com.oracle.database.jdbc</groupId>
             <artifactId>ojdbc8</artifactId>
             <version>${oracle.jdbc.version}</version>
-            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ucp</artifactId>
+            <version>${oracle.jdbc.version}</version>
         </dependency>
 
-        <!-- Used by the included local demo and integration tests. -->
+        <!-- Retained for unit and integration tests that do not require Oracle. -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <version>${h2.version}</version>
-            <scope>runtime</scope>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -74,7 +77,6 @@
                     <encoding>UTF-8</encoding>
                 </configuration>
             </plugin>
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
@@ -83,7 +85,6 @@
                     <useModulePath>false</useModulePath>
                 </configuration>
             </plugin>
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -91,9 +92,7 @@
                 <executions>
                     <execution>
                         <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
+                        <goals><goal>shade</goal></goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
