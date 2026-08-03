@@ -5,10 +5,18 @@ import org.junit.jupiter.api.Test;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+/** Verifies generic traversal of rows and columns returned by a JDBC query. */
 class LoggingQueryResultHandlerTest {
 
+    /**
+     * Verifies that the handler visits every row and reads every column value using JDBC
+     * metadata, allowing it to log arbitrary SELECT result shapes.
+     */
     @Test
     void shouldReadEveryColumnFromEveryRow() throws Exception {
         ResultSet resultSet = mock(ResultSet.class);
