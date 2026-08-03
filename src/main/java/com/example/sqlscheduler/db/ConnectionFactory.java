@@ -4,18 +4,25 @@ import java.sql.Connection;
 import java.sql.SQLException;
 
 /**
- * Abstraction for obtaining JDBC connections.
- *
- * <p>Depending on this interface allows the application to switch from direct
- * {@code DriverManager} connections to a pooled data source without changing query logic.</p>
+ * Provides JDBC connections without exposing whether they are created directly or
+ * borrowed from a connection pool.
  */
-public interface ConnectionFactory {
+public interface ConnectionFactory extends AutoCloseable {
 
     /**
-     * Opens a new JDBC connection.
+     * Obtains a connection for one unit of work.
      *
-     * @return an open connection owned by the caller
-     * @throws SQLException when a connection cannot be established
+     * <p>The caller must close the returned connection. With a pooled implementation,
+     * closing the logical connection returns it to the pool.</p>
+     *
+     * @return open JDBC connection
+     * @throws SQLException when a connection cannot be obtained
      */
     Connection openConnection() throws SQLException;
+
+    /** Releases factory-level resources. Stateless implementations use this no-op default. */
+    @Override
+    default void close() {
+        // No shared resources by default.
+    }
 }
